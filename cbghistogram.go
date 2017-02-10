@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cbhistogram
+package cbghistogram
 
 import (
 	"bytes"
@@ -75,17 +75,19 @@ func (eg *ExponentialGenerator) getBin() *HistogramBin {
 
 // The Histogram
 type Histogram struct {
+	_name string
 	_bins []HistogramBin
 }
 
 // Builds a histogram
-func NewHistogram(n int) *Histogram {
+func NewHistogram(name string, n int) *Histogram {
 	eg := &ExponentialGenerator{
 		_start: 0,
 		_power: 2.0,
 	}
 
 	hist := &Histogram{
+		_name: name,
 		_bins: make([]HistogramBin, n),
 	}
 
@@ -142,6 +144,7 @@ func (h *Histogram) EmitGraph() *bytes.Buffer {
 		}
 	}
 
+	fmt.Fprintf(out, "%s (%v Total)\n", h._name, totalCount)
 	for i := 0; i < len(h._bins); i++ {
 		binCount := h._bins[i]._count
 		if binCount == 0 {
