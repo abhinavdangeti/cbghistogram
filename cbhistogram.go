@@ -28,6 +28,12 @@ type HistogramBin struct {
 	_end   uint64
 }
 
+func (hb *HistogramBin) assign(src *HistogramBin) {
+	hb._count = src._count
+	hb._start = src._start
+	hb._end = src._end
+}
+
 // Returns the count in this bin
 func (hb *HistogramBin) count() uint64 {
 	return atomic.LoadUint64(&hb._count)
@@ -40,7 +46,7 @@ func (hb *HistogramBin) incr(amount uint64) {
 
 // Set a specific value for this bin
 func (hb *HistogramBin) set(val uint64) {
-	atomic.StoreUint64(&hb_count, val)
+	atomic.StoreUint64(&hb._count, val)
 }
 
 // Checks if this bin can contain the value
@@ -56,11 +62,12 @@ type ExponentialGenerator struct {
 	_power float64
 }
 
-func (eg *exponentialGenerator) getBin() *HistogramBin {
+func (eg *ExponentialGenerator) getBin() *HistogramBin {
 	start := uint64(math.Pow(eg._power, float64(eg._start)))
 	eg._start++
 	end := uint64(math.Pow(eg._power, float64(eg._start)))
 	return &HistogramBin{
+		_count: 0,
 		_start: start,
 		_end:   end,
 	}
@@ -69,10 +76,6 @@ func (eg *exponentialGenerator) getBin() *HistogramBin {
 // The Histogram
 type Histogram struct {
 	_bins []HistogramBin
-}
-
-func NewHistogram() {
-	NewHistogram(30)
 }
 
 // Builds a histogram
@@ -117,18 +120,25 @@ func (h *Histogram) Total() uint64 {
 var bar = []byte("##############################")
 
 // Emits the histogram as an ASCII graph
-func (h *Histogram) EmitGraph() {
+func (h *Histogram) EmitGraph() *bytes.Buffer {
 	out := bytes.NewBuffer(make([]byte, 0, 80*len(h._bins)))
 
-	f := fmt.Sprintf("[%%%dd - %%%dd] %%%dd%% 7.2f%%%%")
 	barLen := float64(len(bar))
 
 	var totalCount uint64
 	var maxCount uint64
+	var ranges []string
+	var longestRange int
 	for i := 0; i < len(h._bins); i++ {
 		totalCount += h._bins[i]._count
 		if maxCount < h._bins[i]._count {
 			maxCount = h._bins[i]._count
+		}
+
+		temp := fmt.Sprintf("%v - %v", h._bins[i]._start, h._bins[i]._end)
+		ranges = append(ranges, temp)
+		if h._bins[i]._count > 0 && longestRange < len(temp) {
+			longestRange = len(temp)
 		}
 	}
 
@@ -138,9 +148,13 @@ func (h *Histogram) EmitGraph() {
 			continue
 		}
 
-		fmt.Fprintf(out, f,
-			h._bins[i]._start, h._bins[i]._end,
-			binCount, 100.0*(float64(binCount)/float64(totalCount)))
+		var padding string
+		for j := 0; j < (longestRange - len(ranges[i])); j++ {
+			padding = padding + " "
+		}
+
+		fmt.Fprintf(out, "[%s] %s%10v %7.2f%%",
+			ranges[i], padding, binCount, 100.0*(float64(binCount)/float64(totalCount)))
 
 		out.Write([]byte(" "))
 		barWant := int(math.Floor(barLen * (float64(binCount) / float64(maxCount))))
@@ -155,25 +169,25 @@ func (h *Histogram) EmitGraph() {
 // Populates the histogram bins using the exponential generator
 func (h *Histogram) fill(eg *ExponentialGenerator) {
 	for i := 0; i < len(h._bins); i++ {
-		h._bins[i] = eg.getBin()
+		h._bins[i].assign(eg.getBin())
 	}
 
 	// If there will not naturally be one, create a bin for the
 	// smallest possible value
-	start_of_firt_bin := h._bins[0]._start
+	start_of_first_bin := h._bins[0]._start
 	if start_of_first_bin > 0 {
-		hb := &HistogramBin{
+		hb := HistogramBin{
 			_count: 0,
 			_start: 0,
 			_end:   start_of_first_bin,
 		}
-		h._bins = append(hb, h._bins)
+		h._bins = append([]HistogramBin{hb}, h._bins...)
 	}
 
 	// Also create one reaching to the largest possible value
 	end_of_last_bin := h._bins[len(h._bins)-1]._end
 	if end_of_last_bin < math.MaxUint64 {
-		hb := &HistogramBin{
+		hb := HistogramBin{
 			_count: 0,
 			_start: end_of_last_bin,
 			_end:   math.MaxUint64,
@@ -186,7 +200,7 @@ func (h *Histogram) fill(eg *ExponentialGenerator) {
 
 // This validates that we're sorted and have no gaps or overlaps. Returns
 // true if tests pass, else false
-func (h *Histogram) verify() {
+func (h *Histogram) verify() bool {
 	prev := uint64(0)
 	for i := 0; i < len(h._bins); i++ {
 		if h._bins[i]._start != prev {
@@ -204,7 +218,7 @@ func (h *Histogram) verify() {
 // if not found
 func (h *Histogram) findBin(amount uint64) *HistogramBin {
 	if amount == math.MaxUint64 {
-		return h._bins[len(h._bins)-1]
+		return &h._bins[len(h._bins)-1]
 	}
 
 	index := len(h._bins) - 1
@@ -216,10 +230,10 @@ func (h *Histogram) findBin(amount uint64) *HistogramBin {
 	}
 
 	if !h._bins[index].accepts(amount) {
-		return h._bins[len(h._bins)-1]
+		return &h._bins[len(h._bins)-1]
 	}
 
-	return h._bins[index]
+	return &h._bins[index]
 }
 
 // ---------------- Histogram APIS (end) ------------------ //
