@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 )
 
@@ -75,8 +76,12 @@ func (eg *ExponentialGenerator) getBin() *HistogramBin {
 
 // The Histogram
 type Histogram struct {
+	// Name assogicated with the histogram
 	_name string
+	// Array of histogram bins
 	_bins []HistogramBin
+
+	m sync.Mutex
 }
 
 // Builds a histogram
@@ -100,22 +105,28 @@ func NewHistogram(name string, n int) *Histogram {
 
 // Add a value to this histogram
 func (h *Histogram) Add(amount uint64, count uint64) {
+	h.m.Lock()
 	h.findBin(amount).incr(count)
+	h.m.Unlock()
 }
 
 // Set all bins to zero
 func (h *Histogram) Reset() {
+	h.m.Lock()
 	for i := 0; i < len(h._bins); i++ {
 		h._bins[i].set(0)
 	}
+	h.m.Unlock()
 }
 
 // Gets the total number of samples counted
 func (h *Histogram) Total() uint64 {
+	h.m.Lock()
 	var count uint64
 	for i := 0; i < len(h._bins); i++ {
 		count += h._bins[i]._count
 	}
+	h.m.Unlock()
 	return count
 }
 
@@ -131,6 +142,9 @@ func (h *Histogram) EmitGraph() *bytes.Buffer {
 	var maxCount uint64
 	var ranges []string
 	var longestRange int
+
+	h.m.Lock()
+
 	for i := 0; i < len(h._bins); i++ {
 		totalCount += h._bins[i]._count
 		if maxCount < h._bins[i]._count {
@@ -165,6 +179,8 @@ func (h *Histogram) EmitGraph() *bytes.Buffer {
 
 		out.Write([]byte("\n"))
 	}
+
+	h.m.Unlock()
 
 	return out
 }
