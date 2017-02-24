@@ -233,8 +233,9 @@ func (h *Histogram) verify() bool {
 	return true
 }
 
-// Finds the bin containing the specified amount. Returns index of last bin
-// if not found
+// Finds the bin containing the specified amount.
+// Returns index of last bin if not found
+// (Sequential lookup)
 func (h *Histogram) findBin(amount uint64) *HistogramBin {
 	if amount == math.MaxUint64 {
 		return &h._bins[len(h._bins)-1]
